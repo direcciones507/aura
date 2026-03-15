@@ -1,1 +1,53 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
+  <title>AURA · Asistente de Voz</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <h1>AURA</h1>
+      <p class="subtitle">Habla y yo lo organizo</p>
+    </header>
 
+    <section class="hero">
+      <button id="micButton" class="mic-button" aria-label="Hablar con AURA">
+        🎤
+      </button>
+
+      <p id="status" class="status">Toca para hablar</p>
+    </section>
+
+    <section id="transcript" class="transcript empty-box">
+      Aquí aparecerá lo que dices.
+    </section>
+
+    <section id="response" class="response empty-box">
+      Aquí responderá AURA.
+    </section>
+
+    <section class="quick-actions">
+      <button id="btnHoy" class="secondary-btn">¿Qué tengo hoy?</button>
+      <button id="btnVaciar" class="secondary-btn">Vaciar mi mente</button>
+      <button id="btnLimpiar" class="secondary-btn danger">Borrar todo</button>
+    </section>
+
+    <section class="task-list">
+      <div class="task-list-head">
+        <h2>Hoy tienes</h2>
+        <span id="taskCount" class="task-count">0 tareas</span>
+      </div>
+
+      <div id="taskList"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
