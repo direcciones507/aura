@@ -107,6 +107,49 @@ function speak(text) {
   window.speechSynthesis.speak(utterance);
 }
 
+/* ------------------ RESPUESTAS HUMANAS ------------------ */
+
+function randomItem(list){
+  return list[Math.floor(Math.random()*list.length)];
+}
+
+function speakHuman(list){
+  speak(randomItem(list));
+}
+
+const humanReplies = {
+
+  listening:[
+    "Te escucho.",
+    "Estoy escuchando.",
+    "Adelante, dime."
+  ],
+
+  processed:[
+    "Listo, ya organicé tu mensaje.",
+    "Perfecto, ya entendí.",
+    "Bien, ya lo ordené."
+  ],
+
+  saved:[
+    "Listo, lo guardé.",
+    "Anotado.",
+    "Perfecto, ya lo agregué."
+  ],
+
+  completed:[
+    "Bien hecho.",
+    "Excelente, una cosa menos.",
+    "Buen progreso."
+  ],
+
+  deleted:[
+    "La eliminé.",
+    "Listo, ya no está en tu lista."
+  ]
+
+};
+
 /* ------------------ PROCESAR TEXTO ------------------ */
 function processMentalText(text) {
   if (!text.trim()) return [];
