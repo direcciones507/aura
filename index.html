@@ -2,52 +2,85 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-  />
-  <title>AURA · Asistente de Voz</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AURA v0.2</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <main class="container">
-    <header class="header">
+  <div class="app">
+    <header class="topbar">
       <h1>AURA</h1>
-      <p class="subtitle">Habla y yo lo organizo</p>
+      <p class="subtitle">Asistente de voz personal</p>
     </header>
 
-    <section class="hero">
-      <button id="micButton" class="mic-button" aria-label="Hablar con AURA">
-        🎤
-      </button>
+    <nav class="tabs">
+      <button class="tab active" data-screen="home">Inicio</button>
+      <button class="tab" data-screen="tasks">Tareas</button>
+      <button class="tab" data-screen="history">Historial</button>
+      <button class="tab" data-screen="settings">Configuración</button>
+    </nav>
 
-      <p id="status" class="status">Toca para hablar</p>
-    </section>
+    <!-- INICIO -->
+    <section id="home" class="screen active">
+      <div class="card">
+        <h2>Captura rápida</h2>
+        <p id="status">Estado: listo</p>
 
-    <section id="transcript" class="transcript empty-box">
-      Aquí aparecerá lo que dices.
-    </section>
+        <textarea id="mentalDump" placeholder="Escribe o dicta tu tarea o descarga mental..."></textarea>
 
-    <section id="response" class="response empty-box">
-      Aquí responderá AURA.
-    </section>
+        <div class="actions">
+          <button id="micBtn" class="primary">🎤 Hablar</button>
+          <button id="saveBtn">💾 Guardar tarea</button>
+          <button id="processBtn">🧠 Procesar texto</button>
+        </div>
 
-    <section class="quick-actions">
-      <button id="btnHoy" class="secondary-btn">¿Qué tengo hoy?</button>
-      <button id="btnVaciar" class="secondary-btn">Vaciar mi mente</button>
-      <button id="btnLimpiar" class="secondary-btn danger">Borrar todo</button>
-    </section>
-
-    <section class="task-list">
-      <div class="task-list-head">
-        <h2>Hoy tienes</h2>
-        <span id="taskCount" class="task-count">0 tareas</span>
+        <div id="processedOutput" class="output hidden"></div>
       </div>
-
-      <div id="taskList"></div>
     </section>
-  </main>
 
-  <script src="app.js"></script>
+    <!-- TAREAS -->
+    <section id="tasks" class="screen">
+      <div class="card">
+        <h2>Tareas activas</h2>
+        <div id="tasksList" class="list"></div>
+      </div>
+    </section>
+
+    <!-- HISTORIAL -->
+    <section id="history" class="screen">
+      <div class="card">
+        <h2>Historial</h2>
+        <div id="historyList" class="list"></div>
+      </div>
+    </section>
+
+    <!-- CONFIG -->
+    <section id="settings" class="screen">
+      <div class="card">
+        <h2>Configuración</h2>
+
+        <label class="setting-row">
+          <span>Respuesta por voz</span>
+          <input type="checkbox" id="voiceReplyToggle" checked />
+        </label>
+
+        <label class="setting-row">
+          <span>Idioma de reconocimiento</span>
+          <select id="langSelect">
+            <option value="es-ES">Español</option>
+            <option value="es-US">Español (US)</option>
+            <option value="en-US">English</option>
+          </select>
+        </label>
+
+        <div class="actions">
+          <button id="clearHistoryBtn" class="danger">🗑️ Borrar historial</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="firebase.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
