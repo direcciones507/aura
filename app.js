@@ -60,43 +60,6 @@ tabs.forEach(tab => {
 });
 
 /* ------------------ VOZ ------------------ */
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
-
-if (SpeechRecognition) {
-  recognition = new SpeechRecognition();
-  recognition.lang = settings.lang;
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
-
-  micBtn.addEventListener("click", () => {
-  recognition.lang = settings.lang;
-  statusEl.textContent = "Estado: escuchando...";
-  speakHuman(humanReplies.captureReady);
-  recognition.start();
-});
-
-  recognition.onresult = (event) => {
-    const text = event.results[0][0].transcript;
-    mentalDump.value = text;
-    statusEl.textContent = `Estado: escuché "${text}"`;
-    speak("Listo, ya capturé tu mensaje.");
-  };
-
-  recognition.onerror = (event) => {
-    statusEl.textContent = `Error de voz: ${event.error}`;
-  };
-
-  recognition.onend = () => {
-    if (statusEl.textContent === "Estado: escuchando...") {
-      statusEl.textContent = "Estado: listo";
-    }
-  };
-} else {
-  statusEl.textContent = "Tu navegador no soporta reconocimiento de voz.";
-  micBtn.disabled = true;
-}
-
 function speak(text) {
   if (!settings.voiceReply) return;
   if (!("speechSynthesis" in window)) return;
@@ -105,51 +68,110 @@ function speak(text) {
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = settings.lang;
+  utterance.rate = 0.95;
   window.speechSynthesis.speak(utterance);
 }
 
 /* ------------------ RESPUESTAS HUMANAS ------------------ */
-
-function randomItem(list){
-  return list[Math.floor(Math.random()*list.length)];
+function randomItem(list) {
+  return list[Math.floor(Math.random() * list.length)];
 }
 
-function speakHuman(list){
+function speakHuman(list) {
   speak(randomItem(list));
 }
 
 const humanReplies = {
-
-  listening:[
-    "Te escucho.",
-    "Estoy escuchando.",
-    "Adelante, dime."
+  captured: [
+    "Listo, ya capturé tu mensaje.",
+    "Perfecto, ya lo tengo.",
+    "Bien, ya te entendí."
   ],
-
-  processed:[
+  processed: [
     "Listo, ya organicé tu mensaje.",
     "Perfecto, ya entendí.",
     "Bien, ya lo ordené."
   ],
-
-  saved:[
+  savedOne: [
     "Listo, lo guardé.",
     "Anotado.",
     "Perfecto, ya lo agregué."
   ],
-
-  completed:[
-    "Bien hecho.",
-    "Excelente, una cosa menos.",
-    "Buen progreso."
+  savedMany: [
+    "Perfecto. Ya guardé varias tareas.",
+    "Listo. Organicé y guardé todo.",
+    "Muy bien. Ya quedó registrado."
   ],
-
-  deleted:[
+  completed: [
+    "Bien hecho.",
+    "Excelente. Una cosa menos.",
+    "Buen progreso.",
+    "Perfecto. Seguimos."
+  ],
+  reopened: [
+    "La reabrí.",
+    "Listo. Vuelve a estar pendiente.",
+    "Hecha la reapertura."
+  ],
+  deleted: [
     "La eliminé.",
-    "Listo, ya no está en tu lista."
+    "Listo. Ya no está en tu lista."
+  ],
+  historyCleared: [
+    "Historial borrado.",
+    "Listo. Limpié el historial.",
+    "Ya quedó vacío."
   ]
-
 };
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+let isListening = false;
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
+  recognition.lang = settings.lang;
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  micBtn.addEventListener("click", () => {
+    if (isListening) return;
+
+    recognition.lang = settings.lang;
+    statusEl.textContent = "Estado: escuchando...";
+    isListening = true;
+
+    try {
+      recognition.start();
+    } catch (error) {
+      console.error("Error iniciando reconocimiento:", error);
+      statusEl.textContent = "Estado: listo";
+      isListening = false;
+    }
+  });
+
+  recognition.onresult = event => {
+    const text = event.results[0][0].transcript;
+    mentalDump.value = text;
+    statusEl.textContent = `Estado: escuché "${text}"`;
+    speakHuman(humanReplies.captured);
+  };
+
+  recognition.onerror = event => {
+    statusEl.textContent = `Error de voz: ${event.error}`;
+    isListening = false;
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    if (statusEl.textContent === "Estado: escuchando...") {
+      statusEl.textContent = "Estado: listo";
+    }
+  };
+} else {
+  statusEl.textContent = "Tu navegador no soporta reconocimiento de voz.";
+  micBtn.disabled = true;
+}
 
 /* ------------------ PROCESAR TEXTO ------------------ */
 function processMentalText(text) {
@@ -160,23 +182,25 @@ function processMentalText(text) {
     .map(t => t.trim())
     .filter(Boolean);
 
-  return rawParts.map(part => {
-    let clean = part;
-    clean = clean.replace(/^aura[, ]*/i, "");
-    clean = clean.replace(/^mañana\s+/i, "");
-    clean = clean.replace(/^recuérdame\s+/i, "");
-    clean = clean.replace(/^recordarme\s+/i, "");
-    clean = clean.replace(/^tengo que\s+/i, "");
-    clean = clean.replace(/^debo\s+/i, "");
-    clean = clean.replace(/^agrega(r)?\s+/i, "");
-    clean = clean.replace(/^anota(r)?\s+/i, "");
-    clean = clean.replace(/^por favor\s+/i, "");
-    clean = clean.trim();
+  return rawParts
+    .map(part => {
+      let clean = part;
+      clean = clean.replace(/^aura[, ]*/i, "");
+      clean = clean.replace(/^mañana\s+/i, "");
+      clean = clean.replace(/^recuérdame\s+/i, "");
+      clean = clean.replace(/^recordarme\s+/i, "");
+      clean = clean.replace(/^tengo que\s+/i, "");
+      clean = clean.replace(/^debo\s+/i, "");
+      clean = clean.replace(/^agrega(r)?\s+/i, "");
+      clean = clean.replace(/^anota(r)?\s+/i, "");
+      clean = clean.replace(/^por favor\s+/i, "");
+      clean = clean.trim();
 
-    if (!clean) return "";
+      if (!clean) return "";
 
-    return clean.charAt(0).toUpperCase() + clean.slice(1);
-  }).filter(Boolean);
+      return clean.charAt(0).toUpperCase() + clean.slice(1);
+    })
+    .filter(Boolean);
 }
 
 /* ------------------ FECHA Y HORA ------------------ */
@@ -218,10 +242,33 @@ function buildHumanReply(taskCount, dateInfo) {
     return `He guardado ${taskCount} tareas para ${dateInfo.date} a las ${dateInfo.time}.`;
   }
 
-  function getTodayDateString() {
+  if (taskCount > 1 && dateInfo.date) {
+    return `He guardado ${taskCount} tareas para esa fecha.`;
+  }
+
+  if (taskCount > 1) {
+    return `He guardado ${taskCount} tareas.`;
+  }
+
+  if (dateInfo.date && dateInfo.time) {
+    return "He guardado tu recordatorio con fecha y hora.";
+  }
+
+  if (dateInfo.date) {
+    return "He guardado tu recordatorio.";
+  }
+
+  return "He guardado tu tarea.";
+}
+
+function getTodayDateString() {
   const now = new Date();
   return now.toDateString();
 }
+
+/* ------------------ FIRESTORE ------------------ */
+const tasksRef = collection(db, "tasks");
+const historyRef = collection(db, "history");
 
 async function greetOncePerDay() {
   const today = getTodayDateString();
@@ -248,25 +295,6 @@ async function greetOncePerDay() {
   } catch (error) {
     console.error("Error en saludo diario:", error);
   }
-}
-
-  if (taskCount > 1 && dateInfo.date) {
-    return `He guardado ${taskCount} tareas para esa fecha.`;
-  }
-
-  if (taskCount > 1) {
-    return `He guardado ${taskCount} tareas.`;
-  }
-
-  if (dateInfo.date && dateInfo.time) {
-    return "He guardado tu recordatorio con fecha y hora.";
-  }
-
-  if (dateInfo.date) {
-    return "He guardado tu recordatorio.";
-  }
-
-  return "He guardado tu tarea.";
 }
 
 processBtn.addEventListener("click", () => {
@@ -298,12 +326,8 @@ processBtn.addEventListener("click", () => {
   processedOutput.classList.remove("hidden");
   processedOutput.textContent = preview;
 
-  speak("Ya organicé tu mensaje.");
+  speakHuman(humanReplies.processed);
 });
-
-/* ------------------ FIRESTORE ------------------ */
-const tasksRef = collection(db, "tasks");
-const historyRef = collection(db, "history");
 
 saveBtn.addEventListener("click", async () => {
   const text = mentalDump.value.trim();
@@ -346,7 +370,13 @@ saveBtn.addEventListener("click", async () => {
     processedOutput.classList.add("hidden");
     statusEl.textContent = "Estado: tarea guardada";
 
-    speak(buildHumanReply(processedTasks.length, dateInfo));
+    if (dateInfo.date || dateInfo.time) {
+      speak(buildHumanReply(processedTasks.length, dateInfo));
+    } else if (processedTasks.length > 1) {
+      speakHuman(humanReplies.savedMany);
+    } else {
+      speakHuman(humanReplies.savedOne);
+    }
 
     await loadTasks();
     await loadHistory();
@@ -407,6 +437,12 @@ async function loadTasks() {
             createdAt: serverTimestamp()
           });
 
+          if (data.done) {
+            speakHuman(humanReplies.reopened);
+          } else {
+            speakHuman(humanReplies.completed);
+          }
+
           await loadTasks();
           await loadHistory();
         } catch (error) {
@@ -423,6 +459,8 @@ async function loadTasks() {
             type: "task_delete",
             createdAt: serverTimestamp()
           });
+
+          speakHuman(humanReplies.deleted);
 
           await loadTasks();
           await loadHistory();
@@ -490,7 +528,7 @@ clearHistoryBtn.addEventListener("click", async () => {
     });
 
     await Promise.all(deletions);
-    speak("Historial borrado.");
+    speakHuman(humanReplies.historyCleared);
     await loadHistory();
   } catch (error) {
     console.error(error);
@@ -509,5 +547,8 @@ function escapeHtml(str) {
 }
 
 /* ------------------ INICIO ------------------ */
-loadTasks();
-loadHistory();
+(async function initAura() {
+  await loadTasks();
+  await loadHistory();
+  await greetOncePerDay();
+})();
