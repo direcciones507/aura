@@ -188,6 +188,14 @@ saveBtn.addEventListener("click", async () => {
       createdAt: serverTimestamp()
     });
 
+    console.log("Voy a guardar en history...");
+await addDoc(historyRef, {
+  text,
+  type: "capture",
+  createdAt: serverTimestamp()
+});
+console.log("History guardada");
+
     mentalDump.value = "";
     processedOutput.classList.add("hidden");
     statusEl.textContent = "Estado: tarea guardada";
