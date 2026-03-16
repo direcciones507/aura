@@ -174,13 +174,13 @@ saveBtn.addEventListener("click", async () => {
         });
       }
     } else {
-      await addDoc(tasksRef, {
-        text,
-        done: false,
-        source: "voice_or_text",
-        createdAt: serverTimestamp()
-      });
-    }
+  await addDoc(tasksRef, {
+    text: processedTasks[0] || text,
+    done: false,
+    source: "voice_or_text",
+    createdAt: serverTimestamp()
+  });
+}
 
     await addDoc(historyRef, {
       text,
