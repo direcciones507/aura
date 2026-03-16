@@ -100,14 +100,14 @@ function speak(text) {
   if (!settings.voiceReply) return;
   if (!("speechSynthesis" in window)) return;
 
+  window.speechSynthesis.cancel();
+
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = settings.lang;
   window.speechSynthesis.speak(utterance);
 }
 
 /* ------------------ PROCESAR TEXTO ------------------ */
-/* Aquí dejamos un procesador local simple.
-   Luego aquí mismo conectamos OpenAI por backend seguro. */
 function processMentalText(text) {
   if (!text.trim()) return [];
 
@@ -118,12 +118,79 @@ function processMentalText(text) {
 
   return rawParts.map(part => {
     let clean = part;
+    clean = clean.replace(/^aura[, ]*/i, "");
     clean = clean.replace(/^mañana\s+/i, "");
     clean = clean.replace(/^recuérdame\s+/i, "");
+    clean = clean.replace(/^recordarme\s+/i, "");
     clean = clean.replace(/^tengo que\s+/i, "");
     clean = clean.replace(/^debo\s+/i, "");
+    clean = clean.replace(/^agrega(r)?\s+/i, "");
+    clean = clean.replace(/^anota(r)?\s+/i, "");
+    clean = clean.replace(/^por favor\s+/i, "");
+    clean = clean.trim();
+
+    if (!clean) return "";
+
     return clean.charAt(0).toUpperCase() + clean.slice(1);
-  });
+  }).filter(Boolean);
+}
+
+/* ------------------ FECHA Y HORA ------------------ */
+function extractDateTime(text) {
+  const now = new Date();
+  let date = null;
+  let time = null;
+
+  if (/mañana/i.test(text)) {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    date = tomorrow.toISOString().split("T")[0];
+  }
+
+  if (/\bhoy\b/i.test(text)) {
+    date = now.toISOString().split("T")[0];
+  }
+
+  const hourMatch = text.match(/a las\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+
+  if (hourMatch) {
+    let hour = parseInt(hourMatch[1], 10);
+    const minutes = hourMatch[2] ? hourMatch[2] : "00";
+    const period = hourMatch[3] ? hourMatch[3].toLowerCase() : null;
+
+    if (period === "pm" && hour < 12) hour += 12;
+    if (period === "am" && hour === 12) hour = 0;
+
+    if (hour >= 0 && hour <= 23) {
+      time = `${String(hour).padStart(2, "0")}:${minutes}`;
+    }
+  }
+
+  return { date, time };
+}
+
+function buildHumanReply(taskCount, dateInfo) {
+  if (taskCount > 1 && dateInfo.date && dateInfo.time) {
+    return `He guardado ${taskCount} tareas para ${dateInfo.date} a las ${dateInfo.time}.`;
+  }
+
+  if (taskCount > 1 && dateInfo.date) {
+    return `He guardado ${taskCount} tareas para esa fecha.`;
+  }
+
+  if (taskCount > 1) {
+    return `He guardado ${taskCount} tareas.`;
+  }
+
+  if (dateInfo.date && dateInfo.time) {
+    return "He guardado tu recordatorio con fecha y hora.";
+  }
+
+  if (dateInfo.date) {
+    return "He guardado tu recordatorio.";
+  }
+
+  return "He guardado tu tarea.";
 }
 
 processBtn.addEventListener("click", () => {
@@ -135,6 +202,7 @@ processBtn.addEventListener("click", () => {
   }
 
   const tasks = processMentalText(text);
+  const dateInfo = extractDateTime(text);
 
   if (!tasks.length) {
     processedOutput.classList.remove("hidden");
@@ -142,11 +210,19 @@ processBtn.addEventListener("click", () => {
     return;
   }
 
-  processedOutput.classList.remove("hidden");
-  processedOutput.textContent =
-    "Tareas detectadas:\n\n" + tasks.map((t, i) => `${i + 1}. ${t}`).join("\n");
+  let preview = "Tareas detectadas:\n\n";
+  preview += tasks.map((t, i) => `${i + 1}. ${t}`).join("\n");
 
-  speak("Ya organicé tu descarga mental.");
+  if (dateInfo.date || dateInfo.time) {
+    preview += "\n\n";
+    preview += `Fecha: ${dateInfo.date || "No detectada"}\n`;
+    preview += `Hora: ${dateInfo.time || "No detectada"}`;
+  }
+
+  processedOutput.classList.remove("hidden");
+  processedOutput.textContent = preview;
+
+  speak("Ya organicé tu mensaje.");
 });
 
 /* ------------------ FIRESTORE ------------------ */
@@ -163,48 +239,43 @@ saveBtn.addEventListener("click", async () => {
 
   try {
     const processedTasks = processMentalText(text);
+    const dateInfo = extractDateTime(text);
 
-    if (processedTasks.length > 1) {
-      for (const task of processedTasks) {
-        await addDoc(tasksRef, {
-          text: task,
-          done: false,
-          source: "voice_or_text",
-          createdAt: serverTimestamp()
-        });
-      }
-    } else {
-  await addDoc(tasksRef, {
-    text: processedTasks[0] || text,
-    done: false,
-    source: "voice_or_text",
-    createdAt: serverTimestamp()
-  });
-}
+    if (!processedTasks.length) {
+      alert("No pude detectar una tarea válida.");
+      return;
+    }
+
+    for (const task of processedTasks) {
+      await addDoc(tasksRef, {
+        text: task,
+        date: dateInfo.date || null,
+        time: dateInfo.time || null,
+        done: false,
+        source: "voice_or_text",
+        createdAt: serverTimestamp()
+      });
+    }
 
     await addDoc(historyRef, {
       text,
       type: "capture",
+      taskCount: processedTasks.length,
+      date: dateInfo.date || null,
+      time: dateInfo.time || null,
       createdAt: serverTimestamp()
     });
-
-    console.log("Voy a guardar en history...");
-await addDoc(historyRef, {
-  text,
-  type: "capture",
-  createdAt: serverTimestamp()
-});
-console.log("History guardada");
 
     mentalDump.value = "";
     processedOutput.classList.add("hidden");
     statusEl.textContent = "Estado: tarea guardada";
-    speak("Tu tarea fue guardada.");
+
+    speak(buildHumanReply(processedTasks.length, dateInfo));
 
     await loadTasks();
     await loadHistory();
   } catch (error) {
-    console.error(error);
+    console.error("Error guardando en Firebase:", error);
     alert("Error guardando en Firebase.");
   }
 });
@@ -229,11 +300,16 @@ async function loadTasks() {
       const item = document.createElement("div");
       item.className = "item";
 
+      const extraDate = data.date ? `<small>Fecha: ${escapeHtml(data.date)}</small>` : "";
+      const extraTime = data.time ? `<small>Hora: ${escapeHtml(data.time)}</small>` : "";
+
       item.innerHTML = `
         <div class="item-top">
           <div class="item-text">${escapeHtml(data.text || "")}</div>
         </div>
         <small>Estado: ${data.done ? "Completada" : "Pendiente"}</small>
+        ${extraDate}
+        ${extraTime}
         <div class="item-actions">
           <button class="complete-btn">${data.done ? "↩️ Reabrir" : "✅ Completar"}</button>
           <button class="delete-btn danger">🗑️ Eliminar</button>
@@ -244,31 +320,39 @@ async function loadTasks() {
       const deleteBtn = item.querySelector(".delete-btn");
 
       completeBtn.addEventListener("click", async () => {
-        await updateDoc(doc(db, "tasks", taskDoc.id), {
-          done: !data.done
-        });
+        try {
+          await updateDoc(doc(db, "tasks", taskDoc.id), {
+            done: !data.done
+          });
 
-        await addDoc(historyRef, {
-          text: `${data.done ? "Reabierta" : "Completada"}: ${data.text}`,
-          type: "task_update",
-          createdAt: serverTimestamp()
-        });
+          await addDoc(historyRef, {
+            text: `${data.done ? "Reabierta" : "Completada"}: ${data.text}`,
+            type: "task_update",
+            createdAt: serverTimestamp()
+          });
 
-        loadTasks();
-        loadHistory();
+          await loadTasks();
+          await loadHistory();
+        } catch (error) {
+          console.error("Error actualizando tarea:", error);
+        }
       });
 
       deleteBtn.addEventListener("click", async () => {
-        await deleteDoc(doc(db, "tasks", taskDoc.id));
+        try {
+          await deleteDoc(doc(db, "tasks", taskDoc.id));
 
-        await addDoc(historyRef, {
-          text: `Eliminada: ${data.text}`,
-          type: "task_delete",
-          createdAt: serverTimestamp()
-        });
+          await addDoc(historyRef, {
+            text: `Eliminada: ${data.text}`,
+            type: "task_delete",
+            createdAt: serverTimestamp()
+          });
 
-        loadTasks();
-        loadHistory();
+          await loadTasks();
+          await loadHistory();
+        } catch (error) {
+          console.error("Error eliminando tarea:", error);
+        }
       });
 
       tasksList.appendChild(item);
@@ -296,12 +380,17 @@ async function loadHistory() {
     snapshot.forEach(historyDoc => {
       const data = historyDoc.data();
 
+      const dateLine = data.date ? `<small>Fecha: ${escapeHtml(data.date)}</small>` : "";
+      const timeLine = data.time ? `<small>Hora: ${escapeHtml(data.time)}</small>` : "";
+
       const item = document.createElement("div");
       item.className = "item";
 
       item.innerHTML = `
         <div class="item-text">${escapeHtml(data.text || "")}</div>
         <small>Tipo: ${escapeHtml(data.type || "general")}</small>
+        ${dateLine}
+        ${timeLine}
       `;
 
       historyList.appendChild(item);
@@ -326,7 +415,7 @@ clearHistoryBtn.addEventListener("click", async () => {
 
     await Promise.all(deletions);
     speak("Historial borrado.");
-    loadHistory();
+    await loadHistory();
   } catch (error) {
     console.error(error);
     alert("No se pudo borrar el historial.");
@@ -335,7 +424,7 @@ clearHistoryBtn.addEventListener("click", async () => {
 
 /* ------------------ UTILIDAD ------------------ */
 function escapeHtml(str) {
-  return str
+  return String(str)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
