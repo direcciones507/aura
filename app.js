@@ -150,12 +150,70 @@ if (SpeechRecognition) {
     }
   });
 
-  recognition.onresult = event => {
-    const text = event.results[0][0].transcript;
-    mentalDump.value = text;
-    statusEl.textContent = `Estado: escuché "${text}"`;
-    speakHuman(humanReplies.captured);
-  };
+  recognition.onresult = async event => {
+  const text = event.results[0][0].transcript;
+  mentalDump.value = text;
+  statusEl.textContent = `Estado: escuché "${text}"`;
+
+  try {
+    const processedTasks = processMentalText(text);
+    const dateInfo = extractDateTime(text);
+
+    if (!processedTasks.length) {
+      speakHuman(humanReplies.captured);
+      return;
+    }
+
+    for (const task of processedTasks) {
+      await addDoc(tasksRef, {
+        text: task,
+        date: dateInfo.date || null,
+        time: dateInfo.time || null,
+        done: false,
+        source: "voice_auto",
+        createdAt: serverTimestamp()
+      });
+    }
+
+    await addDoc(historyRef, {
+      text,
+      type: "voice_capture",
+      taskCount: processedTasks.length,
+      date: dateInfo.date || null,
+      time: dateInfo.time || null,
+      createdAt: serverTimestamp()
+    });
+
+    processedOutput.classList.remove("hidden");
+
+    let preview = "Tareas detectadas:\n\n";
+    preview += processedTasks.map((t, i) => `${i + 1}. ${t}`).join("\n");
+
+    if (dateInfo.date || dateInfo.time) {
+      preview += "\n\n";
+      preview += `Fecha: ${dateInfo.date || "No detectada"}\n`;
+      preview += `Hora: ${dateInfo.time || "No detectada"}`;
+    }
+
+    processedOutput.textContent = preview;
+    mentalDump.value = "";
+    statusEl.textContent = "Estado: tarea guardada automáticamente";
+
+    if (dateInfo.date || dateInfo.time) {
+      speak(buildHumanReply(processedTasks.length, dateInfo));
+    } else if (processedTasks.length > 1) {
+      speakHuman(humanReplies.savedMany);
+    } else {
+      speakHuman(humanReplies.savedOne);
+    }
+
+    await loadTasks();
+    await loadHistory();
+  } catch (error) {
+    console.error("Error guardando voz automáticamente:", error);
+    alert("Error guardando la tarea por voz.");
+  }
+};
 
   recognition.onerror = event => {
     statusEl.textContent = `Error de voz: ${event.error}`;
