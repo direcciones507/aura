@@ -217,6 +217,38 @@ function buildHumanReply(taskCount, dateInfo) {
     return `He guardado ${taskCount} tareas para ${dateInfo.date} a las ${dateInfo.time}.`;
   }
 
+  function getTodayDateString() {
+  const now = new Date();
+  return now.toDateString();
+}
+
+async function greetOncePerDay() {
+  const today = getTodayDateString();
+  const lastGreeting = localStorage.getItem("aura_lastGreeting");
+
+  if (lastGreeting === today) return;
+
+  try {
+    const snapshot = await getDocs(query(tasksRef, orderBy("createdAt", "desc")));
+    const pendingTasks = snapshot.docs.filter(docItem => !docItem.data().done);
+
+    let message = "";
+
+    if (pendingTasks.length === 0) {
+      message = "Buenos días. Hoy tu agenda está tranquila. Aprovecha el día.";
+    } else if (pendingTasks.length === 1) {
+      message = "Buenos días, Jacinto. Hoy tienes una tarea pendiente. ¿Quieres revisarla?";
+    } else {
+      message = `Buenos días, Jacinto. Hoy tienes ${pendingTasks.length} pendientes. ¿Quieres escucharlos?`;
+    }
+
+    speak(message);
+    localStorage.setItem("aura_lastGreeting", today);
+  } catch (error) {
+    console.error("Error en saludo diario:", error);
+  }
+}
+
   if (taskCount > 1 && dateInfo.date) {
     return `He guardado ${taskCount} tareas para esa fecha.`;
   }
