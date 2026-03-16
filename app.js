@@ -70,10 +70,11 @@ if (SpeechRecognition) {
   recognition.maxAlternatives = 1;
 
   micBtn.addEventListener("click", () => {
-    recognition.lang = settings.lang;
-    statusEl.textContent = "Estado: escuchando...";
-    recognition.start();
-  });
+  recognition.lang = settings.lang;
+  statusEl.textContent = "Estado: escuchando...";
+  speakHuman(humanReplies.captureReady);
+  recognition.start();
+});
 
   recognition.onresult = (event) => {
     const text = event.results[0][0].transcript;
