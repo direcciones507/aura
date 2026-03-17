@@ -21,6 +21,7 @@ const micBtn = document.getElementById("micBtn");
 const saveBtn = document.getElementById("saveBtn");
 const processBtn = document.getElementById("processBtn");
 const processedOutput = document.getElementById("processedOutput");
+const confirmBox = document.getElementById("confirmBox");
 
 const tasksList = document.getElementById("tasksList");
 const historyList = document.getElementById("historyList");
@@ -29,34 +30,59 @@ const voiceReplyToggle = document.getElementById("voiceReplyToggle");
 const langSelect = document.getElementById("langSelect");
 const clearHistoryBtn = document.getElementById("clearHistoryBtn");
 
+const tasksCountEl = document.getElementById("tasksCount");
+const historyCountEl = document.getElementById("historyCount");
+
+const settingsShortcutBtn = document.querySelector("[data-screen-target='settings']");
+
 /* ------------------ CONFIG LOCAL ------------------ */
 const settings = {
   voiceReply: localStorage.getItem("aura_voiceReply") !== "false",
   lang: localStorage.getItem("aura_lang") || "es-ES"
 };
 
-voiceReplyToggle.checked = settings.voiceReply;
-langSelect.value = settings.lang;
+let pendingCapture = null;
+let isListening = false;
+let finalTranscript = "";
 
-voiceReplyToggle.addEventListener("change", () => {
+if (voiceReplyToggle) voiceReplyToggle.checked = settings.voiceReply;
+if (langSelect) langSelect.value = settings.lang;
+
+voiceReplyToggle?.addEventListener("change", () => {
   settings.voiceReply = voiceReplyToggle.checked;
   localStorage.setItem("aura_voiceReply", settings.voiceReply);
 });
 
-langSelect.addEventListener("change", () => {
+langSelect?.addEventListener("change", () => {
   settings.lang = langSelect.value;
   localStorage.setItem("aura_lang", settings.lang);
 });
 
+/* ------------------ FIRESTORE ------------------ */
+const tasksRef = collection(db, "tasks");
+const historyRef = collection(db, "history");
+
 /* ------------------ NAVEGACIÓN ------------------ */
+function openScreen(screenId) {
+  screens.forEach(screen => {
+    screen.classList.toggle("active", screen.id === screenId);
+  });
+
+  tabs.forEach(tab => {
+    tab.classList.toggle("active", tab.dataset.screen === screenId);
+  });
+}
+
 tabs.forEach(tab => {
   tab.addEventListener("click", () => {
-    tabs.forEach(t => t.classList.remove("active"));
-    screens.forEach(s => s.classList.remove("active"));
-
-    tab.classList.add("active");
-    document.getElementById(tab.dataset.screen).classList.add("active");
+    const screenId = tab.dataset.screen;
+    if (!screenId) return;
+    openScreen(screenId);
   });
+});
+
+settingsShortcutBtn?.addEventListener("click", () => {
+  openScreen("settings");
 });
 
 /* ------------------ VOZ ------------------ */
@@ -69,10 +95,10 @@ function speak(text) {
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = settings.lang;
   utterance.rate = 0.95;
+  utterance.pitch = 1;
   window.speechSynthesis.speak(utterance);
 }
 
-/* ------------------ RESPUESTAS HUMANAS ------------------ */
 function randomItem(list) {
   return list[Math.floor(Math.random() * list.length)];
 }
@@ -121,23 +147,31 @@ const humanReplies = {
     "Historial borrado.",
     "Listo. Limpié el historial.",
     "Ya quedó vacío."
+  ],
+  cancelled: [
+    "Cancelado.",
+    "No lo guardé.",
+    "Entendido, no se registró."
   ]
 };
 
+/* ------------------ RECONOCIMIENTO DE VOZ ------------------ */
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
-let isListening = false;
 
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
   recognition.lang = settings.lang;
-  recognition.interimResults = false;
+  recognition.interimResults = true;
+  recognition.continuous = false;
   recognition.maxAlternatives = 1;
 
-  micBtn.addEventListener("click", () => {
+  micBtn?.addEventListener("click", () => {
     if (isListening) return;
 
     recognition.lang = settings.lang;
+    finalTranscript = "";
+    mentalDump.value = "";
     statusEl.textContent = "Estado: escuchando...";
     isListening = true;
 
@@ -150,85 +184,50 @@ if (SpeechRecognition) {
     }
   });
 
-  recognition.onresult = async event => {
-  const text = event.results[0][0].transcript;
-  mentalDump.value = text;
-  statusEl.textContent = `Estado: escuché "${text}"`;
+  recognition.onresult = event => {
+    let interimTranscript = "";
+    let currentFinal = "";
 
-  try {
-    const processedTasks = processMentalText(text);
-    const dateInfo = extractDateTime(text);
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
 
-    if (!processedTasks.length) {
-      speakHuman(humanReplies.captured);
-      return;
+      if (event.results[i].isFinal) {
+        currentFinal += transcript + " ";
+      } else {
+        interimTranscript += transcript;
+      }
     }
 
-    for (const task of processedTasks) {
-      await addDoc(tasksRef, {
-        text: task,
-        date: dateInfo.date || null,
-        time: dateInfo.time || null,
-        done: false,
-        source: "voice_auto",
-        createdAt: serverTimestamp()
-      });
+    finalTranscript += currentFinal;
+    mentalDump.value = (finalTranscript + interimTranscript).trim();
+
+    if (mentalDump.value.trim()) {
+      statusEl.textContent = "Estado: transcribiendo...";
     }
-
-    await addDoc(historyRef, {
-      text,
-      type: "voice_capture",
-      taskCount: processedTasks.length,
-      date: dateInfo.date || null,
-      time: dateInfo.time || null,
-      createdAt: serverTimestamp()
-    });
-
-    processedOutput.classList.remove("hidden");
-
-    let preview = "Tareas detectadas:\n\n";
-    preview += processedTasks.map((t, i) => `${i + 1}. ${t}`).join("\n");
-
-    if (dateInfo.date || dateInfo.time) {
-      preview += "\n\n";
-      preview += `Fecha: ${dateInfo.date || "No detectada"}\n`;
-      preview += `Hora: ${dateInfo.time || "No detectada"}`;
-    }
-
-    processedOutput.textContent = preview;
-    mentalDump.value = "";
-    statusEl.textContent = "Estado: tarea guardada automáticamente";
-
-    if (dateInfo.date || dateInfo.time) {
-      speak(buildHumanReply(processedTasks.length, dateInfo));
-    } else if (processedTasks.length > 1) {
-      speakHuman(humanReplies.savedMany);
-    } else {
-      speakHuman(humanReplies.savedOne);
-    }
-
-    await loadTasks();
-    await loadHistory();
-  } catch (error) {
-    console.error("Error guardando voz automáticamente:", error);
-    alert("Error guardando la tarea por voz.");
-  }
-};
+  };
 
   recognition.onerror = event => {
+    console.error("Error de voz:", event.error);
     statusEl.textContent = `Error de voz: ${event.error}`;
     isListening = false;
   };
 
   recognition.onend = () => {
     isListening = false;
-    if (statusEl.textContent === "Estado: escuchando...") {
+
+    const text = mentalDump.value.trim();
+
+    if (!text) {
       statusEl.textContent = "Estado: listo";
+      return;
     }
+
+    statusEl.textContent = "Estado: mensaje capturado";
+    prepareConfirmationFromText(text, "voice_capture");
   };
 } else {
-  statusEl.textContent = "Tu navegador no soporta reconocimiento de voz.";
-  micBtn.disabled = true;
+  if (statusEl) statusEl.textContent = "Tu navegador no soporta reconocimiento de voz.";
+  if (micBtn) micBtn.disabled = true;
 }
 
 /* ------------------ PROCESAR TEXTO ------------------ */
@@ -243,8 +242,10 @@ function processMentalText(text) {
   return rawParts
     .map(part => {
       let clean = part;
+
       clean = clean.replace(/^aura[, ]*/i, "");
       clean = clean.replace(/^mañana\s+/i, "");
+      clean = clean.replace(/^hoy\s+/i, "");
       clean = clean.replace(/^recuérdame\s+/i, "");
       clean = clean.replace(/^recordarme\s+/i, "");
       clean = clean.replace(/^tengo que\s+/i, "");
@@ -324,38 +325,159 @@ function getTodayDateString() {
   return now.toDateString();
 }
 
-/* ------------------ FIRESTORE ------------------ */
-const tasksRef = collection(db, "tasks");
-const historyRef = collection(db, "history");
+/* ------------------ CONFIRMACIÓN ------------------ */
+function prepareConfirmationFromText(text, source = "manual") {
+  const processedTasks = processMentalText(text);
+  const dateInfo = extractDateTime(text);
 
-async function greetOncePerDay() {
-  const today = getTodayDateString();
-  const lastGreeting = localStorage.getItem("aura_lastGreeting");
+  if (!processedTasks.length) {
+    processedOutput.classList.remove("hidden");
+    processedOutput.textContent = "No pude detectar tareas válidas.";
+    speakHuman(humanReplies.captured);
+    return;
+  }
 
-  if (lastGreeting === today) return;
+  pendingCapture = {
+    originalText: text,
+    tasks: processedTasks,
+    date: dateInfo.date || null,
+    time: dateInfo.time || null,
+    source
+  };
+
+  renderPreview(processedTasks, dateInfo);
+  renderConfirmBox();
+}
+
+function renderPreview(tasks, dateInfo) {
+  if (!processedOutput) return;
+
+  let preview = "Tareas detectadas:\n\n";
+  preview += tasks.map((t, i) => `${i + 1}. ${t}`).join("\n");
+
+  if (dateInfo.date || dateInfo.time) {
+    preview += "\n\n";
+    preview += `Fecha: ${dateInfo.date || "No detectada"}\n`;
+    preview += `Hora: ${dateInfo.time || "No detectada"}`;
+  }
+
+  processedOutput.classList.remove("hidden");
+  processedOutput.textContent = preview;
+}
+
+function renderConfirmBox() {
+  if (!confirmBox || !pendingCapture) return;
+
+  const { originalText, tasks, date, time } = pendingCapture;
+
+  const taskLabel = tasks.length === 1 ? "tarea" : "tareas";
+  const dateLine = date ? `<div class="confirm-meta">📅 ${escapeHtml(date)}</div>` : "";
+  const timeLine = time ? `<div class="confirm-meta">⏰ ${escapeHtml(time)}</div>` : "";
+
+  confirmBox.innerHTML = `
+    <div class="confirm-content">
+      <p class="mini-label">Confirmación</p>
+      <h3>Entendí esto</h3>
+      <div class="confirm-quote">"${escapeHtml(originalText)}"</div>
+
+      <div class="confirm-list">
+        <strong>Voy a guardar ${tasks.length} ${taskLabel}:</strong>
+        <ul>
+          ${tasks.map(task => `<li>${escapeHtml(task)}</li>`).join("")}
+        </ul>
+      </div>
+
+      ${dateLine}
+      ${timeLine}
+
+      <div class="actions">
+        <button id="confirmSaveBtn" class="primary-btn" type="button">Confirmar</button>
+        <button id="editCaptureBtn" class="secondary-btn" type="button">Editar</button>
+        <button id="cancelCaptureBtn" class="danger-btn" type="button">Cancelar</button>
+      </div>
+    </div>
+  `;
+
+  confirmBox.classList.remove("hidden");
+
+  document.getElementById("confirmSaveBtn")?.addEventListener("click", confirmPendingSave);
+  document.getElementById("editCaptureBtn")?.addEventListener("click", editPendingCapture);
+  document.getElementById("cancelCaptureBtn")?.addEventListener("click", cancelPendingCapture);
+}
+
+function hideConfirmBox() {
+  if (!confirmBox) return;
+  confirmBox.classList.add("hidden");
+  confirmBox.innerHTML = "";
+}
+
+function editPendingCapture() {
+  if (!pendingCapture) return;
+  mentalDump.value = pendingCapture.originalText;
+  hideConfirmBox();
+  statusEl.textContent = "Estado: puedes editar el texto";
+  mentalDump.focus();
+}
+
+function cancelPendingCapture() {
+  pendingCapture = null;
+  hideConfirmBox();
+  processedOutput.classList.add("hidden");
+  statusEl.textContent = "Estado: guardado cancelado";
+  speakHuman(humanReplies.cancelled);
+}
+
+async function confirmPendingSave() {
+  if (!pendingCapture) return;
 
   try {
-    const snapshot = await getDocs(query(tasksRef, orderBy("createdAt", "desc")));
-    const pendingTasks = snapshot.docs.filter(docItem => !docItem.data().done);
+    const { originalText, tasks, date, time, source } = pendingCapture;
 
-    let message = "";
-
-    if (pendingTasks.length === 0) {
-      message = "Buenos días. Hoy tu agenda está tranquila. Aprovecha el día.";
-    } else if (pendingTasks.length === 1) {
-      message = "Buenos días, Jacinto. Hoy tienes una tarea pendiente. ¿Quieres revisarla?";
-    } else {
-      message = `Buenos días, Jacinto. Hoy tienes ${pendingTasks.length} pendientes. ¿Quieres escucharlos?`;
+    for (const task of tasks) {
+      await addDoc(tasksRef, {
+        text: task,
+        date: date || null,
+        time: time || null,
+        done: false,
+        source,
+        createdAt: serverTimestamp()
+      });
     }
 
-    speak(message);
-    localStorage.setItem("aura_lastGreeting", today);
+    await addDoc(historyRef, {
+      text: originalText,
+      type: source,
+      taskCount: tasks.length,
+      date: date || null,
+      time: time || null,
+      createdAt: serverTimestamp()
+    });
+
+    mentalDump.value = "";
+    pendingCapture = null;
+    hideConfirmBox();
+    processedOutput.classList.add("hidden");
+    statusEl.textContent = "Estado: tarea guardada";
+
+    if (date || time) {
+      speak(buildHumanReply(tasks.length, { date, time }));
+    } else if (tasks.length > 1) {
+      speakHuman(humanReplies.savedMany);
+    } else {
+      speakHuman(humanReplies.savedOne);
+    }
+
+    await loadTasks();
+    await loadHistory();
+    await updateDashboardCounts();
   } catch (error) {
-    console.error("Error en saludo diario:", error);
+    console.error("Error guardando en Firebase:", error);
+    alert("Error guardando en Firebase.");
   }
 }
 
-processBtn.addEventListener("click", () => {
+/* ------------------ BOTONES PRINCIPALES ------------------ */
+processBtn?.addEventListener("click", () => {
   const text = mentalDump.value.trim();
 
   if (!text) {
@@ -372,22 +494,11 @@ processBtn.addEventListener("click", () => {
     return;
   }
 
-  let preview = "Tareas detectadas:\n\n";
-  preview += tasks.map((t, i) => `${i + 1}. ${t}`).join("\n");
-
-  if (dateInfo.date || dateInfo.time) {
-    preview += "\n\n";
-    preview += `Fecha: ${dateInfo.date || "No detectada"}\n`;
-    preview += `Hora: ${dateInfo.time || "No detectada"}`;
-  }
-
-  processedOutput.classList.remove("hidden");
-  processedOutput.textContent = preview;
-
+  renderPreview(tasks, dateInfo);
   speakHuman(humanReplies.processed);
 });
 
-saveBtn.addEventListener("click", async () => {
+saveBtn?.addEventListener("click", () => {
   const text = mentalDump.value.trim();
 
   if (!text) {
@@ -395,56 +506,13 @@ saveBtn.addEventListener("click", async () => {
     return;
   }
 
-  try {
-    const processedTasks = processMentalText(text);
-    const dateInfo = extractDateTime(text);
-
-    if (!processedTasks.length) {
-      alert("No pude detectar una tarea válida.");
-      return;
-    }
-
-    for (const task of processedTasks) {
-      await addDoc(tasksRef, {
-        text: task,
-        date: dateInfo.date || null,
-        time: dateInfo.time || null,
-        done: false,
-        source: "voice_or_text",
-        createdAt: serverTimestamp()
-      });
-    }
-
-    await addDoc(historyRef, {
-      text,
-      type: "capture",
-      taskCount: processedTasks.length,
-      date: dateInfo.date || null,
-      time: dateInfo.time || null,
-      createdAt: serverTimestamp()
-    });
-
-    mentalDump.value = "";
-    processedOutput.classList.add("hidden");
-    statusEl.textContent = "Estado: tarea guardada";
-
-    if (dateInfo.date || dateInfo.time) {
-      speak(buildHumanReply(processedTasks.length, dateInfo));
-    } else if (processedTasks.length > 1) {
-      speakHuman(humanReplies.savedMany);
-    } else {
-      speakHuman(humanReplies.savedOne);
-    }
-
-    await loadTasks();
-    await loadHistory();
-  } catch (error) {
-    console.error("Error guardando en Firebase:", error);
-    alert("Error guardando en Firebase.");
-  }
+  prepareConfirmationFromText(text, "voice_or_text");
 });
 
+/* ------------------ CARGA DE TAREAS ------------------ */
 async function loadTasks() {
+  if (!tasksList) return;
+
   tasksList.innerHTML = "Cargando tareas...";
 
   try {
@@ -475,15 +543,15 @@ async function loadTasks() {
         ${extraDate}
         ${extraTime}
         <div class="item-actions">
-          <button class="complete-btn">${data.done ? "↩️ Reabrir" : "✅ Completar"}</button>
-          <button class="delete-btn danger">🗑️ Eliminar</button>
+          <button class="complete-btn" type="button">${data.done ? "↩️ Reabrir" : "✅ Completar"}</button>
+          <button class="delete-btn danger-btn" type="button">🗑️ Eliminar</button>
         </div>
       `;
 
       const completeBtn = item.querySelector(".complete-btn");
       const deleteBtn = item.querySelector(".delete-btn");
 
-      completeBtn.addEventListener("click", async () => {
+      completeBtn?.addEventListener("click", async () => {
         try {
           await updateDoc(doc(db, "tasks", taskDoc.id), {
             done: !data.done
@@ -503,12 +571,13 @@ async function loadTasks() {
 
           await loadTasks();
           await loadHistory();
+          await updateDashboardCounts();
         } catch (error) {
           console.error("Error actualizando tarea:", error);
         }
       });
 
-      deleteBtn.addEventListener("click", async () => {
+      deleteBtn?.addEventListener("click", async () => {
         try {
           await deleteDoc(doc(db, "tasks", taskDoc.id));
 
@@ -522,6 +591,7 @@ async function loadTasks() {
 
           await loadTasks();
           await loadHistory();
+          await updateDashboardCounts();
         } catch (error) {
           console.error("Error eliminando tarea:", error);
         }
@@ -535,7 +605,10 @@ async function loadTasks() {
   }
 }
 
+/* ------------------ CARGA DE HISTORIAL ------------------ */
 async function loadHistory() {
+  if (!historyList) return;
+
   historyList.innerHTML = "Cargando historial...";
 
   try {
@@ -573,7 +646,24 @@ async function loadHistory() {
   }
 }
 
-clearHistoryBtn.addEventListener("click", async () => {
+/* ------------------ CONTADORES ------------------ */
+async function updateDashboardCounts() {
+  try {
+    const tasksSnapshot = await getDocs(query(tasksRef, orderBy("createdAt", "desc")));
+    const historySnapshot = await getDocs(query(historyRef, orderBy("createdAt", "desc")));
+
+    const pendingTasks = tasksSnapshot.docs.filter(docItem => !docItem.data().done).length;
+    const historyCount = historySnapshot.size;
+
+    if (tasksCountEl) tasksCountEl.textContent = String(pendingTasks);
+    if (historyCountEl) historyCountEl.textContent = String(historyCount);
+  } catch (error) {
+    console.error("Error actualizando contadores:", error);
+  }
+}
+
+/* ------------------ LIMPIAR HISTORIAL ------------------ */
+clearHistoryBtn?.addEventListener("click", async () => {
   const ok = confirm("¿Seguro que quieres borrar el historial?");
   if (!ok) return;
 
@@ -588,11 +678,40 @@ clearHistoryBtn.addEventListener("click", async () => {
     await Promise.all(deletions);
     speakHuman(humanReplies.historyCleared);
     await loadHistory();
+    await updateDashboardCounts();
   } catch (error) {
     console.error(error);
     alert("No se pudo borrar el historial.");
   }
 });
+
+/* ------------------ SALUDO DIARIO ------------------ */
+async function greetOncePerDay() {
+  const today = getTodayDateString();
+  const lastGreeting = localStorage.getItem("aura_lastGreeting");
+
+  if (lastGreeting === today) return;
+
+  try {
+    const snapshot = await getDocs(query(tasksRef, orderBy("createdAt", "desc")));
+    const pendingTasks = snapshot.docs.filter(docItem => !docItem.data().done);
+
+    let message = "";
+
+    if (pendingTasks.length === 0) {
+      message = "Buenos días. Hoy tu agenda está tranquila. Aprovecha el día.";
+    } else if (pendingTasks.length === 1) {
+      message = "Buenos días, Jacinto. Hoy tienes una tarea pendiente. ¿Quieres revisarla?";
+    } else {
+      message = `Buenos días, Jacinto. Hoy tienes ${pendingTasks.length} pendientes. ¿Quieres escucharlos?`;
+    }
+
+    speak(message);
+    localStorage.setItem("aura_lastGreeting", today);
+  } catch (error) {
+    console.error("Error en saludo diario:", error);
+  }
+}
 
 /* ------------------ UTILIDAD ------------------ */
 function escapeHtml(str) {
@@ -606,7 +725,9 @@ function escapeHtml(str) {
 
 /* ------------------ INICIO ------------------ */
 (async function initAura() {
+  openScreen("home");
   await loadTasks();
   await loadHistory();
+  await updateDashboardCounts();
   await greetOncePerDay();
 })();
